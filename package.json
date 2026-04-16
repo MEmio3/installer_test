@@ -24,10 +24,45 @@
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "category": "Network"
+      "icon": "resources/icon.png",
+      "category": "Network;InstantMessaging",
+      "maintainer": "MESH Team <mesh@example.com>",
+      "description": "Decentralized, privacy-first communication platform"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}.${arch}.${ext}"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libgbm1"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "MEmio3",
+      "repo": "installer_test",
+      "releaseType": "draft"
     },
     "win": {
       "target": "nsis",
@@ -82,6 +117,8 @@
     "electron": "^33.0.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^2.3.0",
+    "sharp": "^0.34.5",
+    "sharp-ico": "^0.1.5",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
