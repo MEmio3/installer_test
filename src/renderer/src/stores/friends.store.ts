@@ -168,24 +168,50 @@ export const useFriendsStore = create<FriendsStore>((set, get) => ({
 
   acceptRequest: async (requestId) => {
     const identity = useIdentityStore.getState().identity
-    if (!identity) return
-    const res = await window.api.friendRequest.accept({
-      requestId,
-      selfUserId: identity.userId,
-      selfUsername: identity.username,
-      selfAvatarColor: identity.avatarPath
-    })
-    if (res.success) {
-      const [friends, requests] = await Promise.all([reloadFriends(), reloadRequests()])
-      set({ friends, friendRequests: requests })
+    if (!identity) {
+      console.error('[friends.store.acceptRequest] No identity loaded')
+      return
+    }
+    console.log('[friends.store.acceptRequest] Accepting request:', requestId, 'as user:', identity.userId)
+    try {
+      const res = await window.api.friendRequest.accept({
+        requestId,
+        selfUserId: identity.userId,
+        selfUsername: identity.username,
+        selfAvatarColor: identity.avatarPath
+      })
+      console.log('[friends.store.acceptRequest] IPC response:', res)
+      if (res.success) {
+        const [friends, requests] = await Promise.all([reloadFriends(), reloadRequests()])
+        set({ friends, friendRequests: requests })
+        console.log('[friends.store.acceptRequest] Store updated, new friendRequests:', requests.length)
+      } else {
+        console.error('[friends.store.acceptRequest] IPC failed:', res.error)
+      }
+    } catch (err) {
+      console.error('[friends.store.acceptRequest] Exception:', err)
     }
   },
 
   declineRequest: async (requestId) => {
     const identity = useIdentityStore.getState().identity
-    if (!identity) return
-    await window.api.friendRequest.reject({ requestId, selfUserId: identity.userId })
-    set({ friendRequests: await reloadRequests() })
+    if (!identity) {
+      console.error('[friends.store.declineRequest] No identity loaded')
+      return
+    }
+    console.log('[friends.store.declineRequest] Declining request:', requestId, 'as user:', identity.userId)
+    try {
+      const res = await window.api.friendRequest.reject({ requestId, selfUserId: identity.userId })
+      console.log('[friends.store.declineRequest] IPC response:', res)
+      if (res.success) {
+        set({ friendRequests: await reloadRequests() })
+        console.log('[friends.store.declineRequest] Store updated')
+      } else {
+        console.error('[friends.store.declineRequest] IPC failed:', res.error)
+      }
+    } catch (err) {
+      console.error('[friends.store.declineRequest] Exception:', err)
+    }
   },
 
   cancelRequest: async (requestId) => {
@@ -253,19 +279,32 @@ export const useFriendsStore = create<FriendsStore>((set, get) => ({
 
   replyMessageRequest: async (otherUserId, content) => {
     const identity = useIdentityStore.getState().identity
-    if (!identity) return { success: false, error: 'No identity.' }
-    const res = await window.api.messageRequest.reply({
-      selfUserId: identity.userId,
-      selfUsername: identity.username,
-      selfAvatarColor: identity.avatarPath,
-      otherUserId,
-      content,
-      timestamp: Date.now()
-    })
-    if (res.success) {
-      set({ messageRequests: await reloadMessageRequests() })
+    if (!identity) {
+      console.error('[friends.store.replyMessageRequest] No identity loaded')
+      return { success: false, error: 'No identity.' }
     }
-    return res
+    console.log('[friends.store.replyMessageRequest] Replying to:', otherUserId, 'with content:', content.slice(0, 50))
+    try {
+      const res = await window.api.messageRequest.reply({
+        selfUserId: identity.userId,
+        selfUsername: identity.username,
+        selfAvatarColor: identity.avatarPath,
+        otherUserId,
+        content,
+        timestamp: Date.now()
+      })
+      console.log('[friends.store.replyMessageRequest] IPC response:', res)
+      if (res.success) {
+        set({ messageRequests: await reloadMessageRequests() })
+        console.log('[friends.store.replyMessageRequest] Store updated')
+      } else {
+        console.error('[friends.store.replyMessageRequest] IPC failed:', res.error)
+      }
+      return res
+    } catch (err) {
+      console.error('[friends.store.replyMessageRequest] Exception:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   },
 
   ignoreMessageRequest: async (requestId) => {
