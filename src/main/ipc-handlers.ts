@@ -211,11 +211,20 @@ export function registerFriendRequestHandlers(): void {
     selfUsername: string
     selfAvatarColor: string | null
   }) => {
+    console.log('[friend-request:accept] called with:', JSON.stringify(payload))
     const all = db.getFriendRequests()
+    console.log('[friend-request:accept] found', all.length, 'requests:', all.map(r => ({ id: r.id, direction: r.direction, from: r.fromUserId, to: r.toUserId })))
     const req = all.find((r) => r.id === payload.requestId)
-    if (!req) return { success: false, error: 'Request not found.' }
-    if (req.direction !== 'incoming') return { success: false, error: 'Not an incoming request.' }
+    if (!req) {
+      console.error('[friend-request:accept] request not found:', payload.requestId)
+      return { success: false, error: 'Request not found.' }
+    }
+    if (req.direction !== 'incoming') {
+      console.error('[friend-request:accept] not an incoming request:', req.direction)
+      return { success: false, error: 'Not an incoming request.' }
+    }
 
+    console.log('[friend-request:accept] accepting request from', req.fromUserId, 'to', req.toUserId)
     // Promote to friend + create conversation locally
     db.addFriend({
       userId: req.fromUserId,
@@ -234,21 +243,28 @@ export function registerFriendRequestHandlers(): void {
     })
     db.removeFriendRequest(req.id)
 
-    socketClient.emitSignaling('friend-request:accept', {
+    const emitPayload = {
       requestId: req.id,
       fromUserId: payload.selfUserId,
       fromUsername: payload.selfUsername,
       fromAvatarColor: payload.selfAvatarColor,
       toUserId: req.fromUserId
-    })
+    }
+    console.log('[friend-request:accept] emitting to signaling:', emitPayload)
+    socketClient.emitSignaling('friend-request:accept', emitPayload)
     return { success: true, friend: { userId: req.fromUserId, username: req.fromUsername, avatarColor: req.fromAvatarColor } }
   })
 
   // Reject an incoming request. Payload: { requestId, selfUserId }
   ipcMain.handle('friend-request:reject', async (_e, payload: { requestId: string; selfUserId: string }) => {
+    console.log('[friend-request:reject] called with:', JSON.stringify(payload))
     const all = db.getFriendRequests()
     const req = all.find((r) => r.id === payload.requestId)
-    if (!req) return { success: false, error: 'Request not found.' }
+    if (!req) {
+      console.error('[friend-request:reject] request not found:', payload.requestId)
+      return { success: false, error: 'Request not found.' }
+    }
+    console.log('[friend-request:reject] removing request:', req.id)
     db.removeFriendRequest(req.id)
     // Task 1 spec says: "No notification to sender". So we do NOT emit.
     // But we still silently notify to clear their outgoing UI; spec says no notification.
@@ -526,8 +542,13 @@ export function registerMessageRequestHandlers(): void {
     content: string
     timestamp: number
   }) => {
+    console.log('[message-request:reply] called with:', JSON.stringify(payload))
     const existing = db.findMessageRequestByOther(payload.otherUserId)
-    if (!existing) return { success: false, error: 'No thread.' }
+    if (!existing) {
+      console.error('[message-request:reply] no thread found for otherUserId:', payload.otherUserId)
+      return { success: false, error: 'No thread.' }
+    }
+    console.log('[message-request:reply] found existing request:', { id: existing.id, direction: existing.direction, status: existing.status })
 
     db.updateMessageRequestStatus(existing.id, 'replied', payload.content.slice(0, 200), payload.timestamp)
 
@@ -542,7 +563,7 @@ export function registerMessageRequestHandlers(): void {
       status: 'sent'
     })
 
-    socketClient.emitSignaling('message-request:message', {
+    const emitPayload = {
       messageId,
       fromUserId: payload.selfUserId,
       fromUsername: payload.selfUsername,
@@ -550,7 +571,9 @@ export function registerMessageRequestHandlers(): void {
       content: payload.content,
       timestamp: payload.timestamp,
       isReply: existing.direction === 'incoming'
-    })
+    }
+    console.log('[message-request:reply] emitting to signaling:', emitPayload)
+    socketClient.emitSignaling('message-request:message', emitPayload)
     return { success: true, messageId }
   })
 
