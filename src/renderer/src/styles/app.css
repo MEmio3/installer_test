@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+@theme {
+  /* === MESH Xbox-Inspired Dark Theme === */
+
+  /* Background layers — deep blacks and dark grays */
+  --color-mesh-bg-primary: #0f0f0f;
+  --color-mesh-bg-secondary: #1a1a1a;
+  --color-mesh-bg-tertiary: #2d2d2d;
+  --color-mesh-bg-elevated: #3d3d3d;
+  --color-mesh-bg-hover: #4a4a4a;
+
+  /* Xbox Green accent family */
+  --color-mesh-green: #107C10;
+  --color-mesh-green-light: #1a9c1a;
+  --color-mesh-green-dark: #0e6b0e;
+  --color-mesh-green-glow: oklch(0.5 0.15 145 / 0.3);
+
+  /* Text hierarchy */
+  --color-mesh-text-primary: #ffffff;
+  --color-mesh-text-secondary: #b3b3b3;
+  --color-mesh-text-muted: #737373;
+
+  /* Borders */
+  --color-mesh-border: #3d3d3d;
+  --color-mesh-border-light: #4a4a4a;
+
+  /* Semantic colors */
+  --color-mesh-danger: #d13438;
+  --color-mesh-danger-hover: #e8383d;
+  --color-mesh-warning: #ffb900;
+  --color-mesh-info: #0078d4;
+
+  /* Typography — Xbox uses Segoe UI */
+  --font-sans: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Border radius — Xbox uses subtle rounding, not pill shapes */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+/* Global base styles */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background-color: var(--color-mesh-bg-primary);
+  color: var(--color-mesh-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+/* Custom scrollbar — Discord dark style */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #2f3136;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #202225;
+}
+
+/* Selection color */
+::selection {
+  background-color: rgba(16, 124, 16, 0.3);
+  color: white;
+}
+
+/* Electron titlebar drag region */
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom range slider — Xbox style */
+.mesh-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.mesh-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.mesh-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* Framer motion animation helpers */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-in {
+  animation: fade-in 0.15s ease-out;
+}

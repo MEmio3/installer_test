@@ -1,0 +1,212 @@
+/**
+ * Network Signature Scanner.
+ *
+ * Probes three layers of the local network topology so the UI can tell the
+ * user exactly which address their friend should use:
+ *
+ *   Layer 1 — Local Machine IP     (os.networkInterfaces)
+ *   Layer 2 — Router WAN IP        (UPnP query to the default gateway)
+ *   Layer 3 — Public Internet IP   (ipify)
+ *
+ * CGNAT detection falls out naturally: if `routerWanIp` is in 10.x.x.x or
+ * 100.64.0.0/10 and differs from `publicIp`, the router itself is behind a
+ * carrier-grade NAT and port-forwarding on the user's router alone will not
+ * make them reachable from the open internet.
+ *
+ * Every external probe has an explicit 3-second timeout and is wrapped in
+ * try/catch. The app must not hang or crash if UPnP is disabled or the
+ * machine is offline.
+ */
+
+import { networkInterfaces } from 'os'
+import { ipcMain } from 'electron'
+
+// `nat-upnp` has no bundled types; fall back to a minimal inline shape.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const natUpnp = require('nat-upnp') as {
+  createClient: () => {
+    externalIp: (cb: (err: Error | null, ip?: string) => void) => void
+    close: () => void
+  }
+}
+
+export interface NetworkSignature {
+  localIp: string | null
+  routerWanIp: string | null
+  publicIp: string | null
+  upnpEnabled: boolean
+}
+
+const PROBE_TIMEOUT_MS = 3000
+
+/** Run a promise with a hard timeout. Rejects with Error('timeout') on expiry. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms)
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (err) => { clearTimeout(timer); reject(err) }
+    )
+  })
+}
+
+// ── Layer 1 ────────────────────────────────────────────────────────────────
+
+/**
+ * First active, non-internal IPv4 address on the machine.
+ * Returns null if the host has no external-facing interface (rare).
+ */
+function getLocalIp(): string | null {
+  const ifaces = networkInterfaces()
+  for (const list of Object.values(ifaces)) {
+    if (!list) continue
+    for (const net of list) {
+      if (net.family === 'IPv4' && !net.internal) return net.address
+    }
+  }
+  return null
+}
+
+// ── Layer 2 ────────────────────────────────────────────────────────────────
+
+/**
+ * Ask the default gateway (via UPnP IGD) for its external IP.
+ * Returns null if UPnP is disabled, absent, or slow to respond.
+ */
+function getRouterWanIp(): Promise<string | null> {
+  return withTimeout(
+    new Promise<string | null>((resolve) => {
+      let client: ReturnType<typeof natUpnp.createClient> | null = null
+      try {
+        client = natUpnp.createClient()
+      } catch {
+        resolve(null)
+        return
+      }
+      client.externalIp((err, ip) => {
+        try { client?.close() } catch { /* ignore */ }
+        if (err || !ip) {
+          resolve(null)
+          return
+        }
+        resolve(ip)
+      })
+    }),
+    PROBE_TIMEOUT_MS
+  ).catch(() => null)
+}
+
+// ── Layer 3 ────────────────────────────────────────────────────────────────
+
+/**
+ * Query ipify for the real internet-facing IP. Uses AbortController for the
+ * timeout so the socket is torn down cleanly on expiry.
+ */
+async function getPublicIp(): Promise<string | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal })
+    if (!res.ok) return null
+    const json = (await res.json()) as { ip?: string }
+    return typeof json.ip === 'string' ? json.ip : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Run all three probes in parallel and return the signature.
+ *
+ * `upnpEnabled` is `true` iff the UPnP query returned an address — a reliable
+ * proxy for "the router exposed an IGD and answered us."
+ */
+export async function scanNetworkSignature(): Promise<NetworkSignature> {
+  const localIp = getLocalIp()
+  const [routerWanIp, publicIp] = await Promise.all([getRouterWanIp(), getPublicIp()])
+  return {
+    localIp,
+    routerWanIp,
+    publicIp,
+    upnpEnabled: routerWanIp !== null
+  }
+}
+
+// ── Cache + IPC ────────────────────────────────────────────────────────────
+
+let cached: NetworkSignature | null = null
+let inFlight: Promise<NetworkSignature> | null = null
+
+/**
+ * Return the most recently cached signature, kicking off a background scan
+ * if none is cached yet. Callers that need a fresh scan should use `refresh`.
+ */
+export function getCachedSignature(): NetworkSignature | null {
+  return cached
+}
+
+export async function refreshNetworkSignature(): Promise<NetworkSignature> {
+  if (inFlight) return inFlight
+  inFlight = scanNetworkSignature()
+    .then((sig) => { cached = sig; return sig })
+    .finally(() => { inFlight = null })
+  return inFlight
+}
+
+export function registerNetworkScannerHandlers(): void {
+  ipcMain.handle('network:scan', async () => {
+    const sig = await refreshNetworkSignature()
+    return { signature: sig, interpretation: interpretSignature(sig) }
+  })
+  ipcMain.handle('network:cached', () => {
+    return cached
+      ? { signature: cached, interpretation: interpretSignature(cached) }
+      : null
+  })
+}
+
+/**
+ * Derive a plain-English reachability verdict from a signature.
+ * Handy for the UI — "you need port forwarding," "you are behind CGNAT," etc.
+ */
+export function interpretSignature(sig: NetworkSignature): {
+  behindCgnat: boolean
+  directlyReachable: boolean
+  explanation: string
+} {
+  const isCgnat = (ip: string | null): boolean => {
+    if (!ip) return false
+    const [a, b] = ip.split('.').map((n) => parseInt(n, 10))
+    if (a === 10) return true
+    if (a === 100 && b >= 64 && b <= 127) return true
+    return false
+  }
+
+  const behindCgnat =
+    sig.routerWanIp !== null &&
+    sig.publicIp !== null &&
+    (isCgnat(sig.routerWanIp) || sig.routerWanIp !== sig.publicIp)
+
+  const directlyReachable =
+    !behindCgnat && sig.publicIp !== null && sig.upnpEnabled
+
+  let explanation: string
+  if (behindCgnat) {
+    explanation =
+      'Your ISP uses Carrier-Grade NAT. Port-forwarding on your router alone will not expose you to the open internet. Use a relay, VPN, or a friend who is directly reachable.'
+  } else if (!sig.publicIp) {
+    explanation = 'Could not reach the internet. Only LAN connections are available right now.'
+  } else if (!sig.upnpEnabled) {
+    explanation =
+      'Your router has a public IP but UPnP is disabled. Friends on a different network can reach you only after you set up manual port-forwarding for TCP 3000.'
+  } else {
+    explanation =
+      'Your router has a public IP and UPnP is available. Friends on any network can reach you at your public IP once port 3000 is forwarded.'
+  }
+
+  return { behindCgnat, directlyReachable, explanation }
+}

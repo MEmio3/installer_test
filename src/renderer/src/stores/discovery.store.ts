@@ -1,0 +1,85 @@
+import { create } from 'zustand'
+import { useIdentityStore } from './identity.store'
+import { useSettingsStore } from './settings.store'
+
+export interface NearbyUser {
+  userId: string
+  username: string
+  avatarColor: string | null
+}
+
+interface DiscoveryStore {
+  nearby: NearbyUser[]
+  loading: boolean
+
+  refresh: () => Promise<void>
+  publishSelf: () => Promise<void>
+  subscribe: () => () => void
+}
+
+export const useDiscoveryStore = create<DiscoveryStore>((set, get) => ({
+  nearby: [],
+  loading: false,
+
+  refresh: async () => {
+    set({ loading: true })
+    try {
+      const [list, blocked] = await Promise.all([
+        window.api.presence.list(),
+        window.api.block.list()
+      ])
+      const blockedIds = new Set(blocked.map((b) => b.userId))
+      set({ nearby: list.filter((u) => !blockedIds.has(u.userId)), loading: false })
+    } catch {
+      set({ loading: false })
+    }
+  },
+
+  publishSelf: async () => {
+    const identity = useIdentityStore.getState().identity
+    if (!identity) return
+    const { privacy } = useSettingsStore.getState()
+    await window.api.presence.update({
+      username: identity.username,
+      avatarColor: (identity as unknown as { avatarPath?: string | null }).avatarPath ?? null,
+      hidden: !!privacy.hideFromDiscovery
+    })
+  },
+
+  subscribe: () => {
+    const unsubs: Array<() => void> = []
+    unsubs.push(
+      window.api.signaling.onPresenceChanged(async (p) => {
+        const payload = p as { userId: string; username?: string; avatarColor?: string | null; hidden?: boolean; removed?: true }
+        const selfId = useIdentityStore.getState().identity?.userId
+        if (payload.userId === selfId) return
+        if (await window.api.block.isBlocked({ userId: payload.userId })) return
+        set((s) => {
+          if (payload.removed || payload.hidden) {
+            return { nearby: s.nearby.filter((u) => u.userId !== payload.userId) }
+          }
+          if (!payload.username) return {}
+          const existing = s.nearby.find((u) => u.userId === payload.userId)
+          const next: NearbyUser = {
+            userId: payload.userId,
+            username: payload.username,
+            avatarColor: payload.avatarColor ?? null
+          }
+          return {
+            nearby: existing
+              ? s.nearby.map((u) => (u.userId === payload.userId ? next : u))
+              : [...s.nearby, next]
+          }
+        })
+      })
+    )
+    // After signaling connects we should also refresh + publish.
+    unsubs.push(
+      window.api.signaling.onConnected(() => {
+        get().publishSelf()
+        get().refresh()
+      })
+    )
+    return () => { for (const u of unsubs) u() }
+  }
+}))
